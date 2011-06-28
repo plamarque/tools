@@ -4,11 +4,13 @@
  */
 
 
-def cl = new CliBuilder(usage: 'groovy ResponseTimeCheck -f file [-l limit] [-r rate]')
+def cl = new CliBuilder(usage: 'groovy ResponseTimeCheck -f file [-l limit] [-r rate] [-i IGNORE]')
 cl.h(longOpt:'help', 'Show usage information and quit')
 cl.l(argName:'limit', longOpt:'limit', args:1, required:true, 'limit of response time to check in ms')
 cl.r(argName:'rate', longOpt:'rate', args:1, required:false, 'Target rate of responses below the limit')
+cl.i(argName:'ignore', longOpt:'ignore', args:1, required:false, 'ignored page')
 cl.f(argName:'file', longOpt:'file', args:1, required:true, 'JMeter output result file, REQUIRED')
+
 
 def opt = cl.parse(args)
 
@@ -20,11 +22,12 @@ def filename = opt.f ? opt.f : "sample.jtl"
 def limit = opt.l ? opt.l.toInteger(): 4000
 def jtlFile = new File(filename)
 def rateLimit = opt.r ? opt.r.toInteger(): 80
+def ignore = opt.i ? opt.i: null
+def ignoredCount = 0;
 
 
 // start parsing
 def testResult = new XmlParser().parseText(jtlFile.text)
-//println "% of responses below ${limit}ms in "
 println "scanning ${jtlFile}..."
 
 DualCounter globalStat = new DualCounter("Global");
@@ -32,17 +35,24 @@ def map = [:] // map of counter per name
 
 testResult.httpSample.each() {
 	def lb = it.@lb // it's the label
-	globalStat.visit(it,limit)
+	
+	if (lb != ignore) 
+	  globalStat.visit(it,limit)
+	else
+	  ignoredCount++;
+	  
 	def pageCounter = (map[lb]) ? map[lb] : new DualCounter(lb)
 	pageCounter.visit(it,limit);
 	map[lb] = pageCounter;
 }
 
 
-def result =  (globalStat.roundedRate > rateLimit) ? "GOOD NEWS!" : "WOOPS..."
+def result =  (globalStat.roundedRate > rateLimit) ? "OK" : "KO"
 
-println "$result : ${globalStat.roundedRate}% of the responses are < ${limit}ms (goal was ${rateLimit}%)"
-println ""
+println "Global Result : $result"
+println "${globalStat.roundedRate}% of the responses are < ${limit}ms (goal was ${rateLimit}%)"
+if (ignoredCount>0)
+  println "  note: $ignoredCount responses were ignored from global stats ('$ignore')"
 println "---- split per page ----"
 
 // print all the results
