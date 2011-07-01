@@ -13,7 +13,7 @@ cl.l(argName:'limit', longOpt:'limit', args:1, required:false, 'limit of respons
 cl.r(argName:'rate', longOpt:'rate', args:1, required:false, 'Target rate of responses below the limit')
 cl.i(argName:'ignore', longOpt:'ignore', args:1, required:false, 'ignored page')
 cl.f(argName:'file', longOpt:'file', args:1, required:false, 'JMeter output result file, REQUIRED')
-
+cl.d(argName:'details', longOpt:'details', args:0, required:false, 'display detail per page')
 
 def opt = cl.parse(args)
 
@@ -25,8 +25,9 @@ def filename = opt.f ? opt.f : "sample.jtl"
 limit = opt.l ? opt.l.toInteger(): 4000
 def jtlFile = new File(filename)
 def rateLimit = opt.r ? opt.r.toInteger(): 80
-ignore = opt.i ? opt.i: null
+ignore = opt.i ? opt.i : null
 ignoredCount = 0;
+showDetailsPerPage = opt.d ? true : false
 
 
 
@@ -35,7 +36,9 @@ map = [:] // map of counter per name
 
 
 // start parsing
-println "scanning ${jtlFile}..."
+
+println "Goal :  ${rateLimit}% of the responses must be below ${limit/1000}s in ${jtlFile}"
+
 use (StaxCategory) { processFile(jtlFile) }
 
 
@@ -57,21 +60,25 @@ def processFile(jtlFile) {
 }
 
 
+
+
 def result =  (globalStat.roundedRate > rateLimit) ? "OK" : "KO"
 
-println "Global Result : $result"
-println "${globalStat.roundedRate}% of the responses are < ${limit}ms (goal was ${rateLimit}%)"
-if (ignoredCount>0)
-  println "  note: $ignoredCount responses were ignored from global stats ('$ignore')"
-println "---- split per page ----"
+println "Result : $result (${globalStat.roundedRate}%)"
 
-// print all the results
-for ( e in map ) {
-	def eresult =  (e.value.roundedRate > rateLimit) ? "OK" : "KO"
-	e.value.print()
-	println " ($eresult)"
-}
-println "----"
+if (ignoredCount>0) println "  - $ignoredCount responses skipped ('$ignore')"
+  
+  if (showDetailsPerPage) {
+    println "---- split per page ----"
+
+    // print all the results
+    for ( e in map ) {
+	    def eresult =  (e.value.roundedRate > rateLimit) ? "OK" : "KO"
+	    e.value.print()
+	    println " ($eresult)"
+    }
+    println "----"
+  }
 
 
 
