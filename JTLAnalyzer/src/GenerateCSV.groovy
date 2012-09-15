@@ -1,7 +1,8 @@
 /**
  * 
- * This script inspect a JMeter output file (.jtl) to calculate the % of pages that give a response below a given limit.
- * It lets you verify goals such as : Page XXX must provide 80% of responses below 1s
+ * This script inspects a JMeter output file (.jtl) to generate aggregated results in a .csv file in order to facilitate ploting.
+ * Agregates are made by VU. The result file contains : Number of Virtual Users (VU), Mean Response Time (MRT), 90% Line Mean Response Time (90%MRT), Response Time Standard Deviation (RTDEV), 'Max. Response Time (RTMax),'Min Response Time' (RTMin), Throughput (THG) , 90% Line Throughput (90%THG), Number of Samples (Samples) and Number of errors (errors)
+
  */
 
 
@@ -11,6 +12,7 @@ def cl = new CliBuilder(usage: 'groovy ResponseTimeCheck -f file [-l label]')
 cl.h(longOpt:'help', 'Show usage information and quit')
 cl.f(argName:'file', longOpt:'file', args:1, required:false, 'JMeter output result file, REQUIRED')
 cl.l(argName:'label', longOpt:'label', args:1, required:false, 'filter ONLY on this sample label')
+cl.s(argName:'step', longOpt:'step', args:1, required:false, 'step of VU to aggregate on')
 
 def opt = cl.parse(args)
 
@@ -29,15 +31,17 @@ label = opt.l ? opt.l : "everything"
 
 samples = 0;
 vuset = new TreeSet([])
-stepSize = 100 // steps of VU increment used for aggregating
+stepSize = opt.s ? opt.s as Integer : 100 // steps of VU increment used for aggregating
 vus = 0
 nextStep = stepSize
 allStats = [new StatCollector()];
 
 // start parsing
-
-println "Will generate stats for $label"
 println "analyzing ${jtlFile}...."
+def header = ['VU','MRT','90%MRT', 'RTDEV.','RTMAX','RTMIN', 'THG','90%THG','Samples','errors']
+header.each {print "$it\t"}
+println ""
+
 use (StaxCategory) { processFile(jtlFile) }
 
 
@@ -58,24 +62,22 @@ def processFile(jtlFile) {
 	}
 }
 
-
-println "max VU: $vus"
-println "$samples samples processed ($ignoredCount filtered)"
-println "aggregated in ${allStats.size()} by steps of $stepSize"
+println "Stats for '$label' : $samples samples ($ignoredCount filtered)."
+println "Computed ${allStats.size()} aggregates of $stepSize VU."
 
 
 
 csvFile.delete()
-def header = ['VU','MRT','TPS','90%MRT','90%TPS','Samples','RTMAX','RTMIN','errors']
+
 csvFile.append header.join(';')
 csvFile.append '\n'
 allStats.each {
-    def row = [it.vu, it.mrt, it.tps, it.getPercentile90RT(), it.getPercentile90TPS(), it.samples, it.rtmax, it.rtmin, it.errors]
+    def row = [it.vu, it.mrt, it.getPercentile90RT(), it.getStandardDeviationRT(), it.rtmax, it.rtmin, , it.tps,  it.getPercentile90TPS(), it.samples, it.errors]
     csvFile.append row.join(';')
     csvFile.append '\n'
 }
 
-println "generated $csvFile"
+println "> $csvFile."
 
 
 
@@ -192,18 +194,16 @@ class StatCollector {
 	
 		if (t>rtmax || rtmax==null) {
 			rtmax=t
-			//println "new max found on $tn: $rtMax"
 		}
 		if (t<rtmin || rtmin==null) {
 			rtmin=t
-			//println "new min found on $tn: $rtMin"
 		}
 
 		
 
 	}
 	
-	public def getStandardDeviation() {
+	public def getStandardDeviationRT() {
 		def sumdelta=0
 		def pRT = getPercentile90RT();
 		percentileRT.each() { 
@@ -249,7 +249,7 @@ class StatCollector {
 
 	
 	public void print() {
-		println "$vu;$mrt;${getStandardDeviation()};$tps;${getPercentile90RT()};${getPercentile90TPS()};$samples;$rtmax;$rtmin;$errors"
+		println "$vu\t$mrt\t${getPercentile90RT()}\t${getStandardDeviationRT()}\t$rtmax\t$rtmin\t$tps\t${getPercentile90TPS()}\t$samples\t$errors"
 	}	
 }
 
