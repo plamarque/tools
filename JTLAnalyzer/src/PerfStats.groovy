@@ -1,53 +1,64 @@
 /**
  * 
  * This script inspects a JMeter output file (.jtl) to generate aggregated stats. 
- * Agregates are made by VU. The result file contains : 
- * Number of Virtual Users (VU), Mean Response Time (MRT), 90% Line Mean Response Time (90%MRT), 'Max. Response Time (RTMax),'Min Response Time' (RTMin), Throughput (THG) , 90% Line Throughput (90%THG), Number of Samples (Samples) and Number of errors (errors).
- * Stats are generatd in a .csv file in order to facilitate ploting.
+ * Aggregates are made by groups VU, assuming the number of VUs is increased in time.
+ * Stats are generated in a .csv file in order to facilitate ploting.
  */
 
 
  import javax.xml.stream.*
 
-def cl = new CliBuilder(usage: 'groovy ResponseTimeCheck -f file [-l label]')
-cl.h(longOpt:'help', 'Show usage information and quit')
-cl.f(argName:'file', longOpt:'file', args:1, required:false, 'JMeter output result file, REQUIRED')
-cl.i(argName:'include', longOpt:'include', args:1, required:false, 'include only samples whose label contains this string')
-cl.s(argName:'step', longOpt:'step', args:1, required:false, 'step of VU to aggregate on')
-cl.l(argName:'limit', longOpt:'limit', args:1, required:false, 'stops gathering stats when MRT is over the given limit (in milliseconds)')
+def cl = new CliBuilder(usage: 'groovy PerfStats -f file [-l limit] [-i include] [-s step]')
+cl.'?'(longOpt:'help', 'Show usage information and quit')
+cl.f(argName:'file', longOpt:'file', args:1, required:false, 'JMeter output file (.jtl) REQUIRED')
+cl.i(argName:'label', longOpt:'include', args:1, required:false, 'include only samples whose label contains this label. default : includes everything')
+cl.s(argName:'vu step', longOpt:'step', args:1, required:false, 'number VU increments to aggregate on. default  is 100')
+cl.l(argName:'milliseconds', longOpt:'limit', args:1, required:false, 'stops gathering stats when MRT is over the given limit (in milliseconds). default : 6000')
 
 
 def opt = cl.parse(args)
 
-if (!opt || opt.h) {
-	System.exit(1);
+if (!opt) // usage already displayed by cl.parse()
+  System.exit(2)
+ 
+if (opt.'?')
+{
+  cl.usage()
+  return
 }
 
+// JTL file. For convenience we try to look for a sample.jtl if it's there
 def filename = opt.f ? opt.f : "sample.jtl"
 def jtlFile = new File(filename)
 
+// stops gathering stats when MRT is over the given limit (in milliseconds)
+limit = opt.l ? opt.l as Integer : 6000 
 
-limit = opt.l ? opt.l as Integer : 6000 // maximum RT above which we stop gathering stats. default = 6s
+// global var that will tell the parser to strop collecting stats when limit is reached
 belowLimit = true
 
-ignoredCount = 0;
-showDetailsPerPage = opt.d ? true : false
+// include only samples whose label contains this label. default : includes everything
 label = opt.i ? opt.i : "everything"
 
+// number VU increments to aggregate on. default  is 100
+stepSize = opt.s ? opt.s as Integer : 100 
 
+
+ignoredCount = 0;
 samples = 0;
 vuset = new TreeSet([])
-stepSize = opt.s ? opt.s as Integer : 100 // steps of VU increment used for aggregating
-vus = 0
-nextStep = stepSize
-allStats = [new StatCollector()];
 
-// start parsing
-println "Stats for '$label' (limit=$limit)"
+vus = 0 // current number of VU counted
+nextStep = stepSize // number of VU for the next increment
+allStats = [new StatCollector()]; // array of stat aggregates
+
+// we are displaying a text table, this is the header.
+println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
 def header = ['nb VU','MRT AVG','THG AVG','90% MRT AVG','90% THG AVG', 'nb sample','RT MAX ','RT MIN','nb error']
 header.each {print "${it.padRight(17)}"}
 println ""
 
+// start parsing
 use (StaxCategory) { processFile(jtlFile) }
 
 
@@ -68,7 +79,7 @@ def processFile(jtlFile) {
 	}
 }
 
-
+// global stats to be computed
 errorRate = 0.0 // % of erros
 errorCount = 0; // number of errors
 stdev = 0.0 // average standard deviation
@@ -76,6 +87,7 @@ sumStd = 0.0 //
 avgRT = 0.0 // average response time
 sumRT = 0.0
 
+// generates the csv stats file
 def csvFile = new File(filename + ".csv")
 csvFile.delete()
 csvFile.append header.join(';')
@@ -95,6 +107,7 @@ allStats.each {
 println "> $csvFile"
 
 
+// generate the global stats file
 avgRT = sumRT/allStats.size()
 stdev = sumStd / allStats.size()
 errorRate = (errorCount / samples)*100
@@ -129,7 +142,7 @@ def processStartElement(element) {
 	  
 		  	if (vus>=nextStep+1) {
 		  		collector.print()
-		  		if (collector.mrt >= limit) {
+		  		if (collector.mrt >= limit) { // stop processing
 		  			belowLimit = false
 		  			break;
 		  		}
@@ -166,9 +179,9 @@ class StaxCategory {
 /** **/
 class StatCollector {
   int vu;        // number of VU in the step 
-  def mrt;      // mean response tume
+  Double mrt;      // mean response tume
   def stdv; // standard deviation
-  def tps;      // throughput average
+  Double tps;      // throughput average
   def samples = 0; // number of samples 
   def rtmax;  // max response time
   def rtmin;  // min response time
@@ -244,7 +257,7 @@ class StatCollector {
 		return sumdelta/percentileRT.size()
 	}
 	
-	public def getPercentile90RT() {
+	public Double getPercentile90RT() {
 		percentileRT = allRT.sort()
 		def total = percentileRT.size()
 		int toCut = (0.1*total)
@@ -259,7 +272,7 @@ class StatCollector {
 	   return sum/percentileRT.size()      
 	}
 	
-    public def getPercentile90TPS() {
+    public Double getPercentile90TPS() {
 		percentileTPS = allTPS.sort()
 		def total = percentileTPS.size()
 		int toCut = (0.1*total)
@@ -281,14 +294,20 @@ class StatCollector {
 	
 	public void print() {
 		def pad = 17
+		def smrt = "${mrt.round()} ms"
+		def stps = "${tps.round()} rq/s"
+		def smrt90 = "${getPercentile90RT().round()} ms"
+		def stps90 = "${getPercentile90TPS().round()} rq/s"
+		def srtmax = "${rtmax} ms"
+		def srtmin = "${rtmin} ms"
 		print "${vu.toString().padRight(pad)}"
-		print "${mrt.toString().padRight(pad)}"
-		print "${tps.toString().padRight(pad)}"		
-		print "${getPercentile90RT().toString().padRight(pad)}"
-		print "${getPercentile90TPS().toString().padRight(pad)}"		
+		print "${smrt.padRight(pad)}"
+		print "${stps.padRight(pad)}"		
+		print "${smrt90.padRight(pad)}"
+		print "${stps90.padRight(pad)}"		
 		print "${samples.toString().padRight(pad)}"		
-		print "${rtmax.toString().padRight(pad)}"
-		print "${rtmin.toString().padRight(pad)}"
+		print "${srtmax.padRight(pad)}"
+		print "${srtmin.padRight(pad)}"
 		print "${errors.toString().padRight(pad)}"
 		println ""
 	}	
