@@ -94,16 +94,21 @@ csvFile.append header.join(';')
 csvFile.append '\n'
 allStats.each {
 	def errors = it.errors
-	errorCount+= errors
+
 	def rt = it.getPercentile90RT()
 	def std = it.getStandardDeviationRT()
 	def samples = it.samples
+
     def row = [it.vu, it.mrt, it.tps, rt, , samples, it.rtmax, it.rtmin, errors]
     csvFile.append row.join(';')
     csvFile.append '\n'
-	sumRT += rt
-	sumStd += std
-	sumSamples+=samples
+ 
+ 	if (rt <= limit) {   
+     errorCount+= errors
+	 sumRT += rt
+	 sumStd += std
+	 sumSamples+=samples
+ 	}
 	
 }
 println "> $csvFile"
@@ -116,6 +121,11 @@ errorRate = (errorCount / sumSamples)*100
 
 def infoFile = new File(filename + ".info.txt")
 infoFile.delete()
+
+println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
+infoFile.append("Stats for samples labeled : $label\n")
+infoFile.append("Aggregation level : $stepSize VU\n")
+infoFile.append("Limit : ${limit}ms\n")
 infoFile.append("Samples: $sumSamples\n")
 infoFile.append("Errors: $errorCount\n")
 infoFile.append("Error Rate: $errorRate %\n")
