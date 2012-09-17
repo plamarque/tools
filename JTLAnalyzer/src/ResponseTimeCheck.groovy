@@ -37,8 +37,8 @@ map = [:] // map of counter per name
 
 // start parsing
 
-println "Goal :  ${rateLimit}% of the responses must be below ${limit/1000}s in ${jtlFile}"
-
+println "Goal :  ${rateLimit}% of the responses must be below ${limit/1000}s "
+println "analyzing ${jtlFile}...."
 use (StaxCategory) { processFile(jtlFile) }
 
 
