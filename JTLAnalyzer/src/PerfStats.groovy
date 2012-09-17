@@ -44,7 +44,7 @@ allStats = [new StatCollector()];
 
 // start parsing
 println "Stats for '$label' (limit=$limit)"
-def header = ['nb VU','MRT AVG','THG AVG','90% MRT AVG','90% THG AVG', 'nb sample','RT MAX ','RT MAX','nb error']
+def header = ['nb VU','MRT AVG','THG AVG','90% MRT AVG','90% THG AVG', 'nb sample','RT MAX ','RT MIN','nb error']
 header.each {print "${it.padRight(17)}"}
 println ""
 
@@ -85,7 +85,8 @@ allStats.each {
 	errorCount+= errors;
 	def rt = it.getPercentile90RT();
 	def std = it.getStandardDeviationRT();
-    def row = [it.vu, it.mrt, rt, std, it.rtmax, it.rtmin, , it.tps,  it.getPercentile90TPS(), it.samples, errors]
+	['nb VU','MRT AVG','THG AVG','90% MRT AVG','90% THG AVG','nb sample','RT MAX ','RT MIN','nb error']
+    def row = [it.vu, it.mrt, it.tps, rt, it.getPercentile90TPS(), it.samples, it.rtmax, it.rtmin, errors]
     csvFile.append row.join(';')
     csvFile.append '\n'
 	sumRT += rt
