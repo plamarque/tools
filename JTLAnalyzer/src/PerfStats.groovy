@@ -45,7 +45,6 @@ stepSize = opt.s ? opt.s as Integer : 100
 
 
 ignoredCount = 0;
-samples = 0;
 vuset = new TreeSet([])
 
 vus = 0 // current number of VU counted
@@ -54,7 +53,7 @@ allStats = [new StatCollector()]; // array of stat aggregates
 
 // we are displaying a text table, this is the header.
 println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
-def header = ['nb VU','MRT AVG','THG AVG','90% MRT AVG','90% THG AVG', 'nb sample','RT MAX ','RT MIN','nb error']
+def header = ['nb VU','MRT AVG','THG AVG','90% MRT AVG', 'nb sample','RT MAX ','RT MIN','nb error']
 header.each {print "${it.padRight(17)}"}
 println ""
 
@@ -86,6 +85,7 @@ stdev = 0.0 // average standard deviation
 sumStd = 0.0 // 
 avgRT = 0.0 // average response time
 sumRT = 0.0
+sumSamples = 0;
 
 // generates the csv stats file
 def csvFile = new File(filename + ".csv")
@@ -93,16 +93,18 @@ csvFile.delete()
 csvFile.append header.join(';')
 csvFile.append '\n'
 allStats.each {
-	def errors = it.errors;
-	errorCount+= errors;
-	def rt = it.getPercentile90RT();
-	def std = it.getStandardDeviationRT();
-	['nb VU','MRT AVG','THG AVG','90% MRT AVG','90% THG AVG','nb sample','RT MAX ','RT MIN','nb error']
-    def row = [it.vu, it.mrt, it.tps, rt, it.getPercentile90TPS(), it.samples, it.rtmax, it.rtmin, errors]
+	def errors = it.errors
+	errorCount+= errors
+	def rt = it.getPercentile90RT()
+	def std = it.getStandardDeviationRT()
+	def samples = it.samples
+    def row = [it.vu, it.mrt, it.tps, rt, , samples, it.rtmax, it.rtmin, errors]
     csvFile.append row.join(';')
     csvFile.append '\n'
 	sumRT += rt
 	sumStd += std
+	sumSamples+=samples
+	
 }
 println "> $csvFile"
 
@@ -110,11 +112,11 @@ println "> $csvFile"
 // generate the global stats file
 avgRT = sumRT/allStats.size()
 stdev = sumStd / allStats.size()
-errorRate = (errorCount / samples)*100
+errorRate = (errorCount / sumSamples)*100
 
 def infoFile = new File(filename + ".info.txt")
 infoFile.delete()
-infoFile.append("Samples: $samples\n")
+infoFile.append("Samples: $sumSamples\n")
 infoFile.append("Errors: $errorCount\n")
 infoFile.append("Error Rate: $errorRate %\n")
 infoFile.append("Average Response Time: $avgRT ms\n")
@@ -135,17 +137,12 @@ def processStartElement(element) {
 
 		  boolean acceptedLabel = ((label == "everything") || lb.contains(label))
 		 
-		  if (acceptedLabel && belowLimit) {
-		  	samples++
+		  if (acceptedLabel) {
 		  	vuset.add(tn) 
 		  	vus = vuset.size()
 	  
 		  	if (vus>=nextStep+1) {
 		  		collector.print()
-		  		if (collector.mrt >= limit) { // stop processing
-		  			belowLimit = false
-		  			break;
-		  		}
 		  		nextStep+=stepSize
 		  		collector =  new StatCollector()
 		  		allStats.add(collector)
@@ -187,15 +184,15 @@ class StatCollector {
   def rtmin;  // min response time
   def errors=0; // error
   def label;
-  def count = 0
+  def validSamples = 0
   def cumulRt = 0;
-  def allRT = [] // all Resp. Time
-  def percentileRT = [] // 90% best Resp. Time
-  def allTPS = [] // all throughputs
-  def percentileTPS = [] // 90% throughputs
+  List allRT = [] // all Resp. Time
+  List percentileRT = [] // 90% best Resp. Time
+
   
   long startTime = 0;
   long endTime = 0;
+
   
   
   	public void visit(def element, def vus) {
@@ -205,35 +202,32 @@ class StatCollector {
 		def tn = element.tn
 		def ts = element.ts as Long
 		
-
+		samples++
+	  
 		if (success!= null && success == "false")  {
 			errors++
 			return // we don't count the samples in error
 		}
 		
 		label = tn
-		count++
+		
 		allRT.add(t)
-		
 		vu = vus 
-		samples++
 		
-		// get the time range
-		if (startTime == 0L) startTime = ts 
-		else endTime = ts
-		
+		 validSamples++
+		 
 		// compute the throughput
-		if (endTime > 0L) {
-			def interval = (endTime - startTime)
-			def intervalSeconds = interval / 1000
-			if (intervalSeconds == 0) intervalSeconds = 1
-		    tps = samples/intervalSeconds
-		    allTPS.add(tps)
-		}
-		
+		if (startTime == 0) startTime = endTime = ts;
+		if (ts < startTime) startTime = ts 
+		if (ts > endTime) endTime = ts 
+		if (ts > startTime) {
+		  def intervalSeconds = (endTime - startTime) / 1000
+		  tps = validSamples/intervalSeconds
+		} 
+
 		
 		cumulRt += t
-		mrt = cumulRt / samples
+		mrt = cumulRt / validSamples
 		
 	
 		if (t>rtmax || rtmax==null) {
@@ -246,6 +240,9 @@ class StatCollector {
 		
 
 	}
+	
+	
+
 	
 	public def getStandardDeviationRT() {
 		def sumdelta=0
@@ -261,7 +258,7 @@ class StatCollector {
 		percentileRT = allRT.sort()
 		def total = percentileRT.size()
 		int toCut = (0.1*total)
-		def start = (total-toCut)
+
 	   
 	    if (total>10) {
 	     (1..toCut).each{percentileRT.pop()}
@@ -272,20 +269,7 @@ class StatCollector {
 	   return sum/percentileRT.size()      
 	}
 	
-    public Double getPercentile90TPS() {
-		percentileTPS = allTPS.sort()
-		def total = percentileTPS.size()
-		int toCut = (0.1*total)
-		def start = (total-toCut)
-	   
-	    if (total>10) {
-	     (1..toCut).each{percentileTPS.pop()}
-	    } 
 
-	   def sum = 0;
-	   percentileTPS.each{sum+=it}
-	   return sum/percentileTPS.size()    
-    }
 	
 
 	
@@ -297,14 +281,12 @@ class StatCollector {
 		def smrt = "${mrt.round()} ms"
 		def stps = "${tps.round()} rq/s"
 		def smrt90 = "${getPercentile90RT().round()} ms"
-		def stps90 = "${getPercentile90TPS().round()} rq/s"
 		def srtmax = "${rtmax} ms"
 		def srtmin = "${rtmin} ms"
 		print "${vu.toString().padRight(pad)}"
 		print "${smrt.padRight(pad)}"
 		print "${stps.padRight(pad)}"		
-		print "${smrt90.padRight(pad)}"
-		print "${stps90.padRight(pad)}"		
+		print "${smrt90.padRight(pad)}"	
 		print "${samples.toString().padRight(pad)}"		
 		print "${srtmax.padRight(pad)}"
 		print "${srtmin.padRight(pad)}"
