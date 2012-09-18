@@ -43,18 +43,28 @@ label = opt.i ? opt.i : "everything"
 // number VU increments to aggregate on. default  is 100
 stepSize = opt.s ? opt.s as Integer : 100 
 
+// counter for number of samples ignored
+ignoredCount = 0
 
-ignoredCount = 0;
-threadnames = new TreeSet([]) // names of thread whose stats have been collected
+// names of thread whose stats have been collected
+threadnames = new TreeSet([]) 
 
-vus = 0 // current number of VU counted
-nextStep = stepSize // number of VU for the next increment
-collector = new StatCollector() // current collector
-allStats = [nextStep : collector] // map of stat collectors by step
+// current number of VU counted
+vus = 0
+
+// number of VU for the next increment
+nextStep = stepSize 
+
+// current collector
+collector = new StatCollector() 
+
+// map of stat collectors by step
+allStats = ["$stepSize" : collector] 
+
 
 // we are displaying a text table, this is the header.
-println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
-def header = ['nb VU','MRT AVG','THG AVG','90% MRT AVG', 'nb sample','RT MAX ','RT MIN','nb error']
+//println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
+def header = ['Concurrent Users','Mean RT (ms)','Throughput (rq/s)','90% RT (ms)', 'samples','MAX RT ','MIN RT','errors']
 header.each {print "${it.padRight(17)}"}
 println ""
 
@@ -88,6 +98,7 @@ avgRT = 0.0 // average response time
 sumRT = 0.0
 sumSamples = 0
 vu3000 = 0
+vulimit = 0
 
 // generates the csv stats file
 def csvFile = new File(filename + ".csv")
@@ -103,8 +114,9 @@ allStats.each() { vus, stat ->
     def row = [vus, stat.mrt, stat.tps, p90mrt, samples, stat.rtmax, stat.rtmin, errors]
     csvFile.append row.join(';')
     csvFile.append '\n'
-    if (p90mrt >= 3000) vu3000 = vus
- 	if (p90mrt <= limit) {   
+    if (p90mrt <= 3000) vu3000 = vus
+ 	if (p90mrt <= limit) {   	 
+	 vulimit = vus
      errorCount+= errors
 	 sumRT += p90mrt
 	 sumStd += std
@@ -123,12 +135,13 @@ def errorRate = ((sumSamples == 0) ? 0 : (errorCount / sumSamples)*100) as Doubl
 def infoFile = new File(filename + ".info.txt")
 infoFile.delete()
 
-infoFile.append("Options : requests='$label', limit=$limit ms, step=$stepSize vu\n")
+infoFile.append("Options : requests='$label', limit=$limit, step=$stepSize\n")
 infoFile.append("Samples: $sumSamples\n")
 infoFile.append("Errors: $errorCount\n")
-infoFile.append("Error Rate: ${errorRate.round()} %\n")
+infoFile.append("Error Rate: ${errorRate.round(2)} %\n")
 infoFile.append("Average RT: ${avgRT.round()} ms\n")
-infoFile.append("Average RT < 3s: $vu3000 concurrent users\n")
+infoFile.append("Max Concurrent Users with MRT < 3s: $vu3000\n")
+infoFile.append("Max Concurrent Users with MRT < ${limit/1000}s: $vulimit\n")
 infoFile.append("Standard Deviation RT : ${stdev.round()}\n")
 println "\n${infoFile.text}"
 println "> $infoFile"
@@ -150,13 +163,13 @@ def processStartElement(element) {
 	  
 	        // if we reached next step, create a new group
 		  	if (vus>=nextStep+1) {
-		  		collector.display(vus-1) // print previous collector when we reached the step
+		  		collector.print() // print previous collector when we reached the step
 		  		nextStep+=stepSize
 		  		collector =  new StatCollector()
 		  		allStats.put(nextStep, collector)
-		  		collector.visit(element)  		
+		  		collector.visit(element,vus)  		
 		  	} else {		  	
-			  collector.visit(element)	
+			  collector.visit(element,vus)	
 		  	}
 
 		  } 
@@ -183,6 +196,7 @@ class StaxParser {
 
 /** **/
 class StatCollector {
+  int vu = 0       // number of VU in the step 
   double mrt = 0      // mean response tume
   double stdv = 0 // standard deviation
   double tps = 0      // throughput average
@@ -202,7 +216,7 @@ class StatCollector {
 
   
   
-  	public void visit(def element) {
+  	public void visit(def element, def vus) {
   	    def t = element.t.toInteger()  // t is the response time
 		def lb = element.lb // lb is the page the label
 		def success = element.s // success
@@ -219,7 +233,7 @@ class StatCollector {
 		label = tn
 		
 		allRT.add(t)
-
+		vu = vus 
 		
 		 validSamples++
 		 
@@ -286,15 +300,14 @@ class StatCollector {
 	
 
 	
-	public void display(def nbvus) {
+	public void print() {
 		def pad = 17
 		def smrt = "${mrt.round()} ms"
 		def stps = "${tps.round()} rq/s"
 		def smrt90 = "${getPercentile90RT().round()} ms"
 		def srtmax = "${rtmax} ms"
 		def srtmin = "${rtmin} ms"
-		def svus = "${nbvus}"
-		print "${svus.padRight(pad)}"
+		print "${vu.toString().padRight(pad)}"
 		print "${smrt.padRight(pad)}"
 		print "${stps.padRight(pad)}"		
 		print "${smrt90.padRight(pad)}"	
