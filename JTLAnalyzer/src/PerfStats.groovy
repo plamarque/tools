@@ -155,12 +155,13 @@ def processStartElement(element) {
 		  def lb = element.lb
 		  def tn = element.tn
 
+		  threadnames.add(tn)
+		  vus = threadnames.size() // number of  concurrent users = number of different thread names
+		  
 		  boolean acceptedLabel = ((label == "everything") || lb.contains(label))
-		 
+
+		  		 
 		  if (acceptedLabel) {
-		  	threadnames.add(tn) 
-		  	vus = threadnames.size() // number of  concurrent users = number of different thread names
-	  
 	        // if we reached next step, create a new group
 		  	if (vus>=nextStep+1) {
 		  		collector.print() // print previous collector when we reached the step
