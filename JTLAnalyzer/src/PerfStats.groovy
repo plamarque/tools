@@ -38,7 +38,7 @@ limit = opt.l ? opt.l as Integer : 8000
 belowLimit = true
 
 // include only samples whose label contains this label. default : includes all
-filter = opt.i
+filter = opt.i ? opt.i : null
 
 // number VU increments to aggregate on. default  is 100
 stepSize = opt.s ? opt.s as Integer : 100 
@@ -58,6 +58,12 @@ collector = new StatCollector()
 
 // map of stat collectors by step
 allStats = ["$stepSize" : collector] 
+
+// total number of samples
+counter = 0
+
+// timsestamp of the first sample 
+startTime = 0L
 
 
 // we are displaying a text table, this is the header.
@@ -89,7 +95,7 @@ def processFile(jtlFile) {
 }
 
 // print the last collected group
-collector.fprint(nextStep, PAD)
+collector.fprint(vus + collector.validSamples + collector.errors, PAD)
 
 
 
@@ -104,6 +110,7 @@ sumSamples = 0
 vu3000 = 0
 vulimit = 0
 
+
 // generates the csv stats file
 def csvFile = new File(filename + ".csv")
 csvFile.delete()
@@ -113,7 +120,7 @@ allStats.each() { vus, stat ->
 	def errors = stat.errors
 	def p90mrt = stat.getPercentile90RT()
 	def std = stat.getStandardDeviationRT()
-	def samples = stat.samples
+	def samples = stat.validSamples
 
     def row = [vus, stat.mrt, stat.tps, p90mrt, samples, stat.rtmax, stat.rtmin, errors]
     csvFile.append row.join(';')
@@ -138,8 +145,8 @@ def errorRate = ((sumSamples == 0) ? 0 : (errorCount / sumSamples)*100) as Doubl
 
 def infoFile = new File(filename + ".info.txt")
 infoFile.delete()
-
-infoFile.append("Options : requests='$filter', limit=$limit, step=$stepSize\n")
+String sfilter = filter ? "requests='$filter'," : ""
+infoFile.append("Options:$sfilter limit=$limit, step=$stepSize\n")
 infoFile.append("Samples: $sumSamples\n")
 infoFile.append("Errors: $errorCount\n")
 infoFile.append("Error Rate: ${errorRate.round(2)} %\n")
@@ -159,7 +166,7 @@ def processStartElement(element) {
 		case 'httpSample':
 		  def lb = element.lb
 		  def tn = element.tn
-
+		  if (startTime == 0) startTime = element.ts as Long;
 		  threadnames.add(tn)
 		  vus = threadnames.size() // number of  concurrent users = number of different thread names
 		  
@@ -170,7 +177,8 @@ def processStartElement(element) {
 			  allStats.put(nextStep, collector)
 		  }
 		  
-		 collector.visit(element, filter)
+		 collector.visit(element, filter, startTime, counter)
+		 counter++;
 
 
 		break
@@ -211,12 +219,12 @@ class StatCollector {
   List percentileRT = [] // 90% best Resp. Time
 
   
-  long startTime = 0
+  
   long endTime = 0
 
   
   
-  	public void visit(def element, def filter) {
+  	public void visit(def element, def filter, def startTime, def totalSamples) {
   	    def t = element.t.toInteger()  // t is the response time
 		def lb = element.lb // lb is the page the label
 		def success = element.s // success
@@ -231,9 +239,14 @@ class StatCollector {
 		}
 		
 		label = tn
-		boolean shouldIgnore = ((label.trim().length() == 0) || (filter != null && lb.contains(filter)))
-		if (shouldIgnore) {return ; // filter 
-		 println "ignored empty thread : $lb"	
+		
+		boolean matchFilter = (filter != null && lb.contains(filter))
+		
+		boolean shouldIgnore = ((label.trim().length() == 0) || matchFilter)
+		if (shouldIgnore) {
+			//println "ignored empty thread : $lb"
+			return ; // filter 
+		
 		}
 		
 			
@@ -243,12 +256,12 @@ class StatCollector {
 		allRT.add(t)
 		 
 		// compute the throughput
-		if (startTime == 0) startTime = endTime = ts;
-		if (ts < startTime) startTime = ts 
+		if (ts < startTime) startTime = ts // might happen if first sample is not the first in time
 		if (ts > endTime) endTime = ts 
 		if (ts > startTime) {
 		  def intervalSeconds = (endTime - startTime) / 1000
-		  tps = validSamples/intervalSeconds
+		  tps = totalSamples/intervalSeconds // throughput is computed on all samples, not only the valid ones
+		  //println "sample $totalSamples : $tps r/s"
 		} 
 
 		
@@ -318,7 +331,7 @@ class StatCollector {
 		print "${smrt.padRight(pad)}"
 		print "${stps.padRight(pad)}"		
 		print "${smrt90.padRight(pad)}"	
-		print "${samples.toString().padRight(pad)}"		
+		print "${validSamples.toString().padRight(pad)}"		
 		print "${srtmax.padRight(pad)}"
 		print "${srtmin.padRight(pad)}"
 		print "${errors.toString().padRight(pad)}"
