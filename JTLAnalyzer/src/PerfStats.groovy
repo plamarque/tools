@@ -45,11 +45,12 @@ stepSize = opt.s ? opt.s as Integer : 100
 
 
 ignoredCount = 0;
-vuset = new TreeSet([])
+threadnames = new TreeSet([]) // names of thread whose stats have been collected
 
 vus = 0 // current number of VU counted
 nextStep = stepSize // number of VU for the next increment
-allStats = [new StatCollector()]; // array of stat aggregates
+collector = new StatCollector() // current collector
+allStats = [nextStep : collector] // map of stat collectors by step
 
 // we are displaying a text table, this is the header.
 println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
@@ -92,45 +93,45 @@ def csvFile = new File(filename + ".csv")
 csvFile.delete()
 csvFile.append header.join(';')
 csvFile.append '\n'
-allStats.each {
-	def errors = it.errors
+allStats.each() { vus, stat ->
+	def errors = stat.errors
+	def p90mrt = stat.getPercentile90RT()
+	def std = stat.getStandardDeviationRT()
+	def samples = stat.samples
 
-	def p90mrt = it.getPercentile90RT()
-	def std = it.getStandardDeviationRT()
-	def samples = it.samples
-
-    def row = [it.vu, it.mrt, it.tps, p90mrt, , samples, it.rtmax, it.rtmin, errors]
+    def row = [vus, stat.mrt, stat.tps, p90mrt, samples, stat.rtmax, stat.rtmin, errors]
     csvFile.append row.join(';')
     csvFile.append '\n'
- 
- 	if (rt <= limit) {   
+    if (p90mrt >= 3000) vu3000 = vus
+ 	if (p90mrt <= limit) {   
      errorCount+= errors
 	 sumRT += p90mrt
 	 sumStd += std
 	 sumSamples+=samples
  	}
 	
-}
+};
 println "> $csvFile"
 
 
 // generate the global stats file
 avgRT = sumRT/allStats.size()
 stdev = sumStd / allStats.size()
-errorRate = (errorCount / sumSamples)*100
+def errorRate = (errorCount / sumSamples)*100 as Double
 
 def infoFile = new File(filename + ".info.txt")
 infoFile.delete()
 
 println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
-infoFile.append("Stats for samples labeled : $label\n")
-infoFile.append("Aggregation level : $stepSize VU\n")
-infoFile.append("Limit : ${limit}ms\n")
+infoFile.append("Requests : $label\n")
+infoFile.append("Aggregation : every $stepSize concurrent users\n")
+infoFile.append("Limit : ${limit} ms\n")
 infoFile.append("Samples: $sumSamples\n")
 infoFile.append("Errors: $errorCount\n")
-infoFile.append("Error Rate: $errorRate %\n")
-infoFile.append("Average Response Time: $avgRT ms\n")
-infoFile.append("Standard RT Deviation: $stdev\n")
+infoFile.append("Error Rate: ${errorRate.round()} %\n")
+infoFile.append("Average RT: ${avgRT.round()} ms\n")
+infoFile.append("Average RT < 3s: $vu3000 concurrent users\n")
+infoFile.append("Standard Deviation RT : ${stdev.round()}\n")
 println "\n${infoFile.text}"
 println "> $infoFile"
 
@@ -142,20 +143,19 @@ def processStartElement(element) {
 		case 'httpSample':
 		  def lb = element.lb
 		  def tn = element.tn
-		  def collector = allStats.last();
-
 
 		  boolean acceptedLabel = ((label == "everything") || lb.contains(label))
 		 
 		  if (acceptedLabel) {
-		  	vuset.add(tn) 
-		  	vus = vuset.size()
+		  	threadnames.add(tn) 
+		  	vus = threadnames.size() // number of  concurrent users = number of different thread names
 	  
+	        // if we reached next step, create a new group
 		  	if (vus>=nextStep+1) {
-		  		collector.print()
+		  		collector.print() // print previous collector when we reached the step
 		  		nextStep+=stepSize
 		  		collector =  new StatCollector()
-		  		allStats.add(collector)
+		  		allStats.put(nextStep, collector)
 		  		collector.visit(element,vus)  		
 		  	} else {		  	
 			  collector.visit(element,vus)	
@@ -185,23 +185,23 @@ class StaxCategory {
 
 /** **/
 class StatCollector {
-  int vu;        // number of VU in the step 
-  Double mrt;      // mean response tume
-  def stdv; // standard deviation
-  Double tps;      // throughput average
-  def samples = 0; // number of samples 
-  def rtmax;  // max response time
-  def rtmin;  // min response time
-  def errors=0; // error
-  def label;
+  int vu = 0       // number of VU in the step 
+  double mrt = 0      // mean response tume
+  double stdv = 0 // standard deviation
+  double tps = 0      // throughput average
+  int samples = 0  // number of samples 
+  def rtmax = 0 // max response time
+  def rtmin = 0 // min response time
+  def errors = 0 // error
+  def label
   def validSamples = 0
-  def cumulRt = 0;
+  def cumulRt = 0
   List allRT = [] // all Resp. Time
   List percentileRT = [] // 90% best Resp. Time
 
   
-  long startTime = 0;
-  long endTime = 0;
+  long startTime = 0
+  long endTime = 0
 
   
   
@@ -254,9 +254,11 @@ class StatCollector {
 	
 
 	
-	public def getStandardDeviationRT() {
+	public Double getStandardDeviationRT() {
 		def sumdelta=0
 		def pRT = getPercentile90RT();
+		if (percentileRT.size() <= 0) return 0D;
+		
 		percentileRT.each() { 
 		  def pdelta = (pRT > it) ?  (pRT - it) :  (it - pRT)
 		  sumdelta+= pdelta
@@ -265,6 +267,7 @@ class StatCollector {
 	}
 	
 	public Double getPercentile90RT() {
+		if (allRT.size <=0 ) { return 0D;}
 		percentileRT = allRT.sort()
 		def total = percentileRT.size()
 		int toCut = (0.1*total)
