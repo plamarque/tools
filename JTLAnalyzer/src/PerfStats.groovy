@@ -118,7 +118,7 @@ allStats.each() { vus, stat ->
  	if (p90mrt <= limit) {   	 
 	 vulimit = vus
      errorCount+= errors
-	 sumRT += p90mrt
+	 sumRT += p90mrt // we compute average of 90 percentile MRT
 	 sumStd += std
 	 sumSamples+=samples
  	}
@@ -139,10 +139,11 @@ infoFile.append("Options : requests='$label', limit=$limit, step=$stepSize\n")
 infoFile.append("Samples: $sumSamples\n")
 infoFile.append("Errors: $errorCount\n")
 infoFile.append("Error Rate: ${errorRate.round(2)} %\n")
-infoFile.append("Average RT: ${avgRT.round()} ms\n")
+infoFile.append("Global Mean Response Time (MRT): ${avgRT.round()} ms\n")
+infoFile.append("Standard Deviation MRT : ${stdev.round()} ms\n")
 infoFile.append("Max Concurrent Users with MRT < 3s: $vu3000\n")
 infoFile.append("Max Concurrent Users with MRT < ${limit/1000}s: $vulimit\n")
-infoFile.append("Standard Deviation RT : ${stdev.round()}\n")
+
 println "\n${infoFile.text}"
 println "> $infoFile"
 
@@ -158,24 +159,22 @@ def processStartElement(element) {
 		  threadnames.add(tn)
 		  vus = threadnames.size() // number of  concurrent users = number of different thread names
 		  
+		  if (vus>=nextStep) {    // if we reached next step, create a new aggregate
+			  collector.fprint(vus)
+			  nextStep+=stepSize	  
+			  collector =  new StatCollector()
+			  allStats.put(nextStep, collector)
+		  }
+		  
 		  boolean acceptedLabel = ((label == "everything") || lb.contains(label))
+		  if (acceptedLabel) {   
+			collector.visit(element)
+		  } else ignoredCount++
+			
 
-		  		 
-		  if (acceptedLabel) {
-	        // if we reached next step, create a new group
-		  	if (vus>=nextStep+1) {
-		  		collector.print() // print previous collector when we reached the step
-		  		nextStep+=stepSize
-		  		collector =  new StatCollector()
-		  		allStats.put(nextStep, collector)
-		  		collector.visit(element,vus)  		
-		  	} else {		  	
-			  collector.visit(element,vus)	
-		  	}
+			
 
-		  } 
-		  else
-		    ignoredCount++
+		  
 
 		break
 
@@ -197,7 +196,7 @@ class StaxParser {
 
 /** **/
 class StatCollector {
-  int vu = 0       // number of VU in the step 
+  //int vu = 0       // number of VU in the step 
   double mrt = 0      // mean response tume
   double stdv = 0 // standard deviation
   double tps = 0      // throughput average
@@ -217,7 +216,7 @@ class StatCollector {
 
   
   
-  	public void visit(def element, def vus) {
+  	public void visit(def element) {
   	    def t = element.t.toInteger()  // t is the response time
 		def lb = element.lb // lb is the page the label
 		def success = element.s // success
@@ -234,7 +233,6 @@ class StatCollector {
 		label = tn
 		
 		allRT.add(t)
-		vu = vus 
 		
 		 validSamples++
 		 
@@ -301,14 +299,15 @@ class StatCollector {
 	
 
 	
-	public void print() {
+	public void fprint(int info) {
 		def pad = 17
 		def smrt = "${mrt.round()} ms"
 		def stps = "${tps.round()} rq/s"
 		def smrt90 = "${getPercentile90RT().round()} ms"
 		def srtmax = "${rtmax} ms"
 		def srtmin = "${rtmin} ms"
-		print "${vu.toString().padRight(pad)}"
+		def svu = "${info} "
+		print "${svu.padRight(pad)}"
 		print "${smrt.padRight(pad)}"
 		print "${stps.padRight(pad)}"		
 		print "${smrt90.padRight(pad)}"	
