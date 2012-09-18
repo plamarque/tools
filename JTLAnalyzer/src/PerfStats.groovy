@@ -32,7 +32,7 @@ def filename = opt.f ? opt.f : "sample.jtl"
 def jtlFile = new File(filename)
 
 // stops gathering stats when MRT is over the given limit (in milliseconds)
-limit = opt.l ? opt.l as Integer : 6000 
+limit = opt.l ? opt.l as Integer : 8000 
 
 // global var that will tell the parser to strop collecting stats when limit is reached
 belowLimit = true
@@ -95,17 +95,17 @@ csvFile.append '\n'
 allStats.each {
 	def errors = it.errors
 
-	def rt = it.getPercentile90RT()
+	def p90mrt = it.getPercentile90RT()
 	def std = it.getStandardDeviationRT()
 	def samples = it.samples
 
-    def row = [it.vu, it.mrt, it.tps, rt, , samples, it.rtmax, it.rtmin, errors]
+    def row = [it.vu, it.mrt, it.tps, p90mrt, , samples, it.rtmax, it.rtmin, errors]
     csvFile.append row.join(';')
     csvFile.append '\n'
  
  	if (rt <= limit) {   
      errorCount+= errors
-	 sumRT += rt
+	 sumRT += p90mrt
 	 sumStd += std
 	 sumSamples+=samples
  	}
