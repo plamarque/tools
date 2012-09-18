@@ -86,7 +86,8 @@ stdev = 0.0 // average standard deviation
 sumStd = 0.0 // 
 avgRT = 0.0 // average response time
 sumRT = 0.0
-sumSamples = 0;
+sumSamples = 0
+vu3000 = 0
 
 // generates the csv stats file
 def csvFile = new File(filename + ".csv")
@@ -117,7 +118,7 @@ println "> $csvFile"
 // generate the global stats file
 avgRT = sumRT/allStats.size()
 stdev = sumStd / allStats.size()
-def errorRate = (errorCount / sumSamples)*100 as Double
+def errorRate = ((sumSamples == 0) ? 0 : (errorCount / sumSamples)*100) as Double
 
 def infoFile = new File(filename + ".info.txt")
 infoFile.delete()
