@@ -59,7 +59,7 @@ header.each {print "${it.padRight(17)}"}
 println ""
 
 // start parsing
-use (StaxCategory) { processFile(jtlFile) }
+use (StaxParser) { processFile(jtlFile) }
 
 
 def processFile(jtlFile) {
@@ -123,10 +123,7 @@ def errorRate = ((sumSamples == 0) ? 0 : (errorCount / sumSamples)*100) as Doubl
 def infoFile = new File(filename + ".info.txt")
 infoFile.delete()
 
-println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
-infoFile.append("Requests : $label\n")
-infoFile.append("Aggregation : every $stepSize concurrent users\n")
-infoFile.append("Limit : ${limit} ms\n")
+infoFile.append("Options : requests='$label', limit=$limit ms, step=$stepSize vu\n")
 infoFile.append("Samples: $sumSamples\n")
 infoFile.append("Errors: $errorCount\n")
 infoFile.append("Error Rate: ${errorRate.round()} %\n")
@@ -153,13 +150,13 @@ def processStartElement(element) {
 	  
 	        // if we reached next step, create a new group
 		  	if (vus>=nextStep+1) {
-		  		collector.print() // print previous collector when we reached the step
+		  		collector.display(vus-1) // print previous collector when we reached the step
 		  		nextStep+=stepSize
 		  		collector =  new StatCollector()
 		  		allStats.put(nextStep, collector)
-		  		collector.visit(element,vus)  		
+		  		collector.visit(element)  		
 		  	} else {		  	
-			  collector.visit(element,vus)	
+			  collector.visit(element)	
 		  	}
 
 		  } 
@@ -171,7 +168,7 @@ def processStartElement(element) {
 	}
 }
 
-class StaxCategory { 
+class StaxParser { 
 	static Object get(XMLStreamReader self, String key) {
 		return self.getAttributeValue(null, key)
 	}
@@ -186,7 +183,6 @@ class StaxCategory {
 
 /** **/
 class StatCollector {
-  int vu = 0       // number of VU in the step 
   double mrt = 0      // mean response tume
   double stdv = 0 // standard deviation
   double tps = 0      // throughput average
@@ -206,7 +202,7 @@ class StatCollector {
 
   
   
-  	public void visit(def element, def vus) {
+  	public void visit(def element) {
   	    def t = element.t.toInteger()  // t is the response time
 		def lb = element.lb // lb is the page the label
 		def success = element.s // success
@@ -223,7 +219,7 @@ class StatCollector {
 		label = tn
 		
 		allRT.add(t)
-		vu = vus 
+
 		
 		 validSamples++
 		 
@@ -290,14 +286,15 @@ class StatCollector {
 	
 
 	
-	public void print() {
+	public void display(def nbvus) {
 		def pad = 17
 		def smrt = "${mrt.round()} ms"
 		def stps = "${tps.round()} rq/s"
 		def smrt90 = "${getPercentile90RT().round()} ms"
 		def srtmax = "${rtmax} ms"
 		def srtmin = "${rtmin} ms"
-		print "${vu.toString().padRight(pad)}"
+		def svus = "${nbvus}"
+		print "${svus.padRight(pad)}"
 		print "${smrt.padRight(pad)}"
 		print "${stps.padRight(pad)}"		
 		print "${smrt90.padRight(pad)}"	
