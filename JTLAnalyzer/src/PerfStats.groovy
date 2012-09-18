@@ -11,7 +11,7 @@
 def cl = new CliBuilder(usage: 'groovy PerfStats -f file [-l limit] [-i include] [-s step]')
 cl.'?'(longOpt:'help', 'Show usage information and quit')
 cl.f(argName:'file', longOpt:'file', args:1, required:false, 'JMeter output file (.jtl) REQUIRED')
-cl.i(argName:'label', longOpt:'include', args:1, required:false, 'include only samples whose label contains this label. default : includes everything')
+cl.i(argName:'label', longOpt:'include', args:1, required:false, 'include only samples whose label contains this label. default : includes all')
 cl.s(argName:'vu step', longOpt:'step', args:1, required:false, 'number VU increments to aggregate on. default  is 100')
 cl.l(argName:'milliseconds', longOpt:'limit', args:1, required:false, 'stops gathering stats when MRT is over the given limit (in milliseconds). default : 6000')
 
@@ -37,14 +37,12 @@ limit = opt.l ? opt.l as Integer : 8000
 // global var that will tell the parser to strop collecting stats when limit is reached
 belowLimit = true
 
-// include only samples whose label contains this label. default : includes everything
-label = opt.i ? opt.i : "everything"
+// include only samples whose label contains this label. default : includes all
+filter = opt.i
 
 // number VU increments to aggregate on. default  is 100
 stepSize = opt.s ? opt.s as Integer : 100 
 
-// counter for number of samples ignored
-ignoredCount = 0
 
 // names of thread whose stats have been collected
 threadnames = new TreeSet([]) 
@@ -64,8 +62,9 @@ allStats = ["$stepSize" : collector]
 
 // we are displaying a text table, this is the header.
 //println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
+PAD = 17
 def header = ['Concurrent Users','Mean RT (ms)','Throughput (rq/s)','90% RT (ms)', 'samples','MAX RT ','MIN RT','errors']
-header.each {print "${it.padRight(17)}"}
+header.each {print "${it.padRight(PAD)}"}
 println ""
 
 // start parsing
@@ -89,8 +88,13 @@ def processFile(jtlFile) {
 	}
 }
 
+// print the last collected group
+collector.fprint(nextStep, PAD)
+
+
+
 // global stats to be computed
-errorRate = 0.0 // % of erros
+errorRate = 0.0 // % of errors
 errorCount = 0; // number of errors
 stdev = 0.0 // average standard deviation
 sumStd = 0.0 // 
@@ -135,7 +139,7 @@ def errorRate = ((sumSamples == 0) ? 0 : (errorCount / sumSamples)*100) as Doubl
 def infoFile = new File(filename + ".info.txt")
 infoFile.delete()
 
-infoFile.append("Options : requests='$label', limit=$limit, step=$stepSize\n")
+infoFile.append("Options : requests='$filter', limit=$limit, step=$stepSize\n")
 infoFile.append("Samples: $sumSamples\n")
 infoFile.append("Errors: $errorCount\n")
 infoFile.append("Error Rate: ${errorRate.round(2)} %\n")
@@ -160,26 +164,22 @@ def processStartElement(element) {
 		  vus = threadnames.size() // number of  concurrent users = number of different thread names
 		  
 		  if (vus>=nextStep) {    // if we reached next step, create a new aggregate
-			  collector.fprint(vus)
+			  collector.fprint(vus, PAD)
 			  nextStep+=stepSize	  
 			  collector =  new StatCollector()
 			  allStats.put(nextStep, collector)
 		  }
 		  
-		  boolean acceptedLabel = ((label == "everything") || lb.contains(label))
-		  if (acceptedLabel) {   
-			collector.visit(element)
-		  } else ignoredCount++
-			
+		 collector.visit(element, filter)
 
-			
-
-		  
 
 		break
 
 	}
 }
+
+
+
 
 class StaxParser { 
 	static Object get(XMLStreamReader self, String key) {
@@ -216,7 +216,7 @@ class StatCollector {
 
   
   
-  	public void visit(def element) {
+  	public void visit(def element, def filter) {
   	    def t = element.t.toInteger()  // t is the response time
 		def lb = element.lb // lb is the page the label
 		def success = element.s // success
@@ -231,10 +231,16 @@ class StatCollector {
 		}
 		
 		label = tn
+		boolean shouldIgnore = ((label.trim().length() == 0) || (filter != null && lb.contains(filter)))
+		if (shouldIgnore) {return ; // filter 
+		 println "ignored empty thread : $lb"	
+		}
 		
+			
+		validSamples++
+		
+		// store the response time, we'll need it for stats
 		allRT.add(t)
-		
-		 validSamples++
 		 
 		// compute the throughput
 		if (startTime == 0) startTime = endTime = ts;
@@ -246,6 +252,7 @@ class StatCollector {
 		} 
 
 		
+		// mean RT
 		cumulRt += t
 		mrt = cumulRt / validSamples
 		
@@ -299,8 +306,8 @@ class StatCollector {
 	
 
 	
-	public void fprint(int info) {
-		def pad = 17
+	public void fprint(int info, int pad) {
+	
 		def smrt = "${mrt.round()} ms"
 		def stps = "${tps.round()} rq/s"
 		def smrt90 = "${getPercentile90RT().round()} ms"
