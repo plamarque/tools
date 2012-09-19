@@ -202,19 +202,19 @@ def processStartElement(element) {
  * Get the collector for a given number of concurrent threads
  */
 def getCollector(long activethreads) {
-	if (activethreads == 0) activethreads = 1
+	//if (activethreads == 0) activethreads = 1
 	
-	def remainder = (activethreads % stepSize)
+	def remainder = ((activethreads-1) % stepSize)
 	
-	def floor = (activethreads - remainder) + stepSize
+	def floor = (activethreads-1 - remainder) + stepSize
 	//if (floor == 0) floor = stepSize
-	//if (remainder > 1) println "floor $activethreads > $floor "
+	//println "floor $activethreads > remainder: $remainder , floor : $floor"
 
 	def collector = allStats[floor]
 	if (collector == null) {
 		collector = new StatCollector()
 		allStats[floor] = collector
-		print "."
+		print "-> $floor"
 	} 
 	return collector
 }
