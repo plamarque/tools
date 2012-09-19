@@ -48,7 +48,7 @@ stepSize = opt.s ? opt.s as Integer : 100
 threadnames = new TreeSet([]) 
 
 // current number of VU counted
-vus = 0
+currentvus = 0
 
 // number of VU for the next increment
 nextStep = stepSize 
@@ -92,7 +92,7 @@ def processFile(jtlFile) {
 }
 
 // print the last collected group
-//collector.fprint(vus + collector.validSamples + collector.errors, PAD)
+//collector.fprint(vus + collector.success + collector.errors, PAD)
 
 
 
@@ -107,6 +107,7 @@ sumSamples = 0
 vu3000 = 0
 vulimit = 0
 
+
 def header = ['Concurrent Users','Mean RT (ms)','Throughput (rq/s)','90% RT (ms)', 'samples','MAX RT ','MIN RT','errors', 'duration (s)', 'Total Samples']
 
 // generates the csv stats file
@@ -116,7 +117,6 @@ csvFile.append header.join(';')
 csvFile.append '\n'
 
 // we are displaying a text table, this is the header.
-//println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
 PAD = 17
 println ""
 header.each {print "${it.padRight(PAD)}"}
@@ -126,7 +126,7 @@ allStats.each() { vus, stat ->
 	def errors = stat.errors
 	def p90mrt = stat.getPercentile90RT()
 	def std = stat.getStandardDeviationRT()
-	def samples = stat.validSamples
+	def samples = stat.success
 
     def row = [vus, stat.mrt, stat.tps, p90mrt, samples, stat.rtmax, stat.rtmin, errors, stat.duration, stat.samples]
     csvFile.append row.join(';')
@@ -170,52 +170,41 @@ def processStartElement(element) {
 	switch(element.name()) {
 		
 		case 'httpSample':
-		  def lb = element.lb
-		  def tn = element.tn
-		  def activethreads = element.na as Long
-		  
+		  def activethreads = element.na as Long	
+		  if (activethreads < currentvus)	  {
+			  //println "ignored ${element.lb} has $activethreads (last step was $currentvus)"
+			  break;
+		   }
+		  currentvus = activethreads
 		  collector = getCollector(activethreads)
-
-		  /*
-		  threadnames.add(tn)
-		  vus = threadnames.size() // number of  concurrent users = number of different thread names
-		  
-		  if (vus>=nextStep) {    // if we reached next step, create a new aggregate
-			  collector.fprint(vus, PAD)
-			  nextStep+=stepSize	  
-			  collector =  new StatCollector()
-			  allStats.put(nextStep, collector)
-		  }
-		  */
-		  
-		 collector.visit(element, filter)
-		 counter++;
-
-
-		break
+		  collector.visit(element, filter)
+		  counter++;
+		  break
 
 	}
 }
+
 
 
 /*
  * Get the collector for a given number of concurrent threads
  */
 def getCollector(long activethreads) {
-	//if (activethreads == 0) activethreads = 1
-	
-	def remainder = ((activethreads-1) % stepSize)
-	
-	def floor = (activethreads-1 - remainder) + stepSize
-	//if (floor == 0) floor = stepSize
-	//println "floor $activethreads > remainder: $remainder , floor : $floor"
 
+
+	
+	// 0-100 > 100, 101-200 > 200
+	def remainder = ((activethreads-1) % stepSize)	
+	def floor = (activethreads-1 - remainder) + stepSize
+	
 	def collector = allStats[floor]
 	if (collector == null) {
 		collector = new StatCollector()
 		allStats[floor] = collector
 		print "-> $floor"
-	} 
+	}
+	//println "vu: ${activethreads} duration: ${collector.duration} samples: ${collector.samples} tps : ${collector.tps}"
+	
 	return collector
 }
 
@@ -241,13 +230,13 @@ class StatCollector {
   int samples = 0  // number of samples 
   def rtmax = 0 // max response time
   def rtmin = 0 // min response time
-  def errors = 0 // error
   def label
-  def validSamples = 0
+  def errors = 0 // number of errors
+  def success = 0 // number of success
   def cumulRt = 0
   List allRT = [] // all Resp. Time
   List percentileRT = [] // 90% best Resp. Time
-  long duration // duration of the 
+  long duration // duration of the step
   
   long startTime = 0L
   long endTime = 0
@@ -257,7 +246,7 @@ class StatCollector {
   	public void visit(def element, def filter) {
   	    def t = element.t.toInteger()  // t is the response time
 		def lb = element.lb // lb is the page the label
-		def success = element.s // success
+		def isSuccess = element.s // success
 		def tn = element.tn
 		def ts = element.ts as Long
 		
@@ -269,29 +258,27 @@ class StatCollector {
 		if (ts < startTime) startTime = ts // might happen if first sample is not the first in time
 		if (ts > endTime) endTime = ts
 		
-		// recalculate throughput since the start of this collector
-		if (ts > startTime) {
-		  duration = (endTime - startTime) / 1000
-		 if (duration>0) tps = samples/duration // throughput is computed on all samples
-		}
-	  
-		// skip errors
-		if (success!= null && success == "false")  {
-			errors++
-			return // we don't count the samples in error
-		}
+		duration = (endTime - startTime) / 1000 // duration of this step in seconds
+		if (duration>0) tps = samples/duration	 // throughput is computed on all samples
+   
+	
 		
-		// ignore ampty and filtered requests
+		// ignore empty and filtered requests
 		label = tn
 		boolean matchFilter = (filter != null && lb.contains(filter))
-		
 		boolean shouldIgnore = ((label.trim().length() == 0) || matchFilter)
 		if (shouldIgnore) {
 			return ; // filter 
 		}
 		
+		// skip errors
+		if (isSuccess!= null && isSuccess == "false")  {
+			errors++
+			return // we don't count the samples in error
+		}
+		
 			
-		validSamples++
+		success++
 		
 		// store the response time, we'll need it for stats
 		allRT.add(t)
@@ -299,7 +286,7 @@ class StatCollector {
 		
 		// mean RT
 		cumulRt += t
-		mrt = cumulRt / validSamples
+		mrt = cumulRt / success
 		
 		// min and max RT
 		if (t>rtmax || rtmax==null) rtmax=t
@@ -310,7 +297,15 @@ class StatCollector {
 	}
 	
 	
+public Double getThroughput() {
 
+	  def duration = (endTime - startTime) / 1000 // duration in seconds
+	 if (duration>0) tps = samples/duration	 // throughput is computed on all samples
+
+  //println "duration: $duration samples: $samples tps : $tps"
+  return tps
+
+	}
 	
 	public Double getStandardDeviationRT() {
 		def sumdelta=0
@@ -355,13 +350,13 @@ class StatCollector {
 		def srtmax = "${rtmax} ms"
 		def srtmin = "${rtmin} ms"
 		def svu = "${info} "
-		def sduration = "${duration} ms"
+		def sduration = "${duration} s"
 		def ssamples = "${samples}"
 		print "${svu.padRight(pad)}"
 		print "${smrt.padRight(pad)}"
 		print "${stps.padRight(pad)}"		
 		print "${smrt90.padRight(pad)}"	
-		print "${validSamples.toString().padRight(pad)}"		
+		print "${success.toString().padRight(pad)}"		
 		print "${srtmax.padRight(pad)}"
 		print "${srtmin.padRight(pad)}"
 		print "${errors.toString().padRight(pad)}"
