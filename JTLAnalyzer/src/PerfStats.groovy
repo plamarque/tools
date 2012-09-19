@@ -62,14 +62,13 @@ allStats = ["$stepSize" : collector]
 // total number of samples
 counter = 0
 
-// timsestamp of the first sample 
-startTime = 0L
+
 
 
 // we are displaying a text table, this is the header.
 //println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
 PAD = 17
-def header = ['Concurrent Users','Mean RT (ms)','Throughput (rq/s)','90% RT (ms)', 'samples','MAX RT ','MIN RT','errors']
+def header = ['Concurrent Users','Mean RT (ms)','Throughput (rq/s)','90% RT (ms)', 'samples','MAX RT ','MIN RT','errors', 'duration (s)', 'Total Samples']
 header.each {print "${it.padRight(PAD)}"}
 println ""
 
@@ -122,7 +121,7 @@ allStats.each() { vus, stat ->
 	def std = stat.getStandardDeviationRT()
 	def samples = stat.validSamples
 
-    def row = [vus, stat.mrt, stat.tps, p90mrt, samples, stat.rtmax, stat.rtmin, errors]
+    def row = [vus, stat.mrt, stat.tps, p90mrt, samples, stat.rtmax, stat.rtmin, errors, stat.duration, stat.samples]
     csvFile.append row.join(';')
     csvFile.append '\n'
     if (p90mrt <= 3000) vu3000 = vus
@@ -166,7 +165,7 @@ def processStartElement(element) {
 		case 'httpSample':
 		  def lb = element.lb
 		  def tn = element.tn
-		  if (startTime == 0) startTime = element.ts as Long;
+
 		  threadnames.add(tn)
 		  vus = threadnames.size() // number of  concurrent users = number of different thread names
 		  
@@ -177,7 +176,7 @@ def processStartElement(element) {
 			  allStats.put(nextStep, collector)
 		  }
 		  
-		 collector.visit(element, filter, startTime, counter)
+		 collector.visit(element, filter)
 		 counter++;
 
 
@@ -217,14 +216,14 @@ class StatCollector {
   def cumulRt = 0
   List allRT = [] // all Resp. Time
   List percentileRT = [] // 90% best Resp. Time
-
+  long duration // duration of the 
   
-  
+  long startTime = 0L
   long endTime = 0
 
   
   
-  	public void visit(def element, def filter, def startTime, def totalSamples) {
+  	public void visit(def element, def filter) {
   	    def t = element.t.toInteger()  // t is the response time
 		def lb = element.lb // lb is the page the label
 		def success = element.s // success
@@ -232,21 +231,32 @@ class StatCollector {
 		def ts = element.ts as Long
 		
 		samples++
+		
+		
+		// compute the throughput
+		if (startTime == 0) startTime = endTime = element.ts as Long
+		if (ts < startTime) startTime = ts // might happen if first sample is not the first in time
+		if (ts > endTime) endTime = ts
+		
+		// recalculate throughput since the start of this collector
+		if (ts > startTime) {
+		  duration = (endTime - startTime) / 1000
+		 if (duration>0) tps = samples/duration // throughput is computed on all samples
+		}
 	  
+		// skip errors
 		if (success!= null && success == "false")  {
 			errors++
 			return // we don't count the samples in error
 		}
 		
+		// ignore ampty and filtered requests
 		label = tn
-		
 		boolean matchFilter = (filter != null && lb.contains(filter))
 		
 		boolean shouldIgnore = ((label.trim().length() == 0) || matchFilter)
 		if (shouldIgnore) {
-			//println "ignored empty thread : $lb"
 			return ; // filter 
-		
 		}
 		
 			
@@ -255,28 +265,15 @@ class StatCollector {
 		// store the response time, we'll need it for stats
 		allRT.add(t)
 		 
-		// compute the throughput
-		if (ts < startTime) startTime = ts // might happen if first sample is not the first in time
-		if (ts > endTime) endTime = ts 
-		if (ts > startTime) {
-		  def intervalSeconds = (endTime - startTime) / 1000
-		  tps = totalSamples/intervalSeconds // throughput is computed on all samples, not only the valid ones
-		  //println "sample $totalSamples : $tps r/s"
-		} 
-
 		
 		// mean RT
 		cumulRt += t
 		mrt = cumulRt / validSamples
 		
-	
-		if (t>rtmax || rtmax==null) {
-			rtmax=t
-		}
-		if (t<rtmin || rtmin==null) {
-			rtmin=t
-		}
-
+		// min and max RT
+		if (t>rtmax || rtmax==null) rtmax=t
+		
+		if (t<rtmin || rtmin==null)  rtmin=t
 		
 
 	}
@@ -327,6 +324,8 @@ class StatCollector {
 		def srtmax = "${rtmax} ms"
 		def srtmin = "${rtmin} ms"
 		def svu = "${info} "
+		def sduration = "${duration} ms"
+		def ssamples = "${samples}"
 		print "${svu.padRight(pad)}"
 		print "${smrt.padRight(pad)}"
 		print "${stps.padRight(pad)}"		
@@ -335,6 +334,8 @@ class StatCollector {
 		print "${srtmax.padRight(pad)}"
 		print "${srtmin.padRight(pad)}"
 		print "${errors.toString().padRight(pad)}"
+		print "${sduration.padRight(pad)}"
+		print "${ssamples.padRight(pad)}"
 		println ""
 	}	
 }
