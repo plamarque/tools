@@ -54,10 +54,10 @@ vus = 0
 nextStep = stepSize 
 
 // current collector
-collector = new StatCollector() 
+//collector = new StatCollector() 
 
 // map of stat collectors by step
-allStats = ["$stepSize" : collector] 
+allStats = [ : ] 
 
 // total number of samples
 counter = 0
@@ -65,12 +65,10 @@ counter = 0
 
 
 
-// we are displaying a text table, this is the header.
-//println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
-PAD = 17
-def header = ['Concurrent Users','Mean RT (ms)','Throughput (rq/s)','90% RT (ms)', 'samples','MAX RT ','MIN RT','errors', 'duration (s)', 'Total Samples']
-header.each {print "${it.padRight(PAD)}"}
-println ""
+print "aggregating stats by groups of $stepSize threads"
+if (filter) print " for samples that match '$filter'"
+
+
 
 // start parsing
 use (StaxParser) { processFile(jtlFile) }
@@ -94,7 +92,7 @@ def processFile(jtlFile) {
 }
 
 // print the last collected group
-collector.fprint(vus + collector.validSamples + collector.errors, PAD)
+//collector.fprint(vus + collector.validSamples + collector.errors, PAD)
 
 
 
@@ -109,13 +107,22 @@ sumSamples = 0
 vu3000 = 0
 vulimit = 0
 
+def header = ['Concurrent Users','Mean RT (ms)','Throughput (rq/s)','90% RT (ms)', 'samples','MAX RT ','MIN RT','errors', 'duration (s)', 'Total Samples']
 
 // generates the csv stats file
 def csvFile = new File(filename + ".csv")
 csvFile.delete()
 csvFile.append header.join(';')
 csvFile.append '\n'
+
+// we are displaying a text table, this is the header.
+//println "Gathering stats for '$label' grouped by increments of $stepSize VU until MRT>=${limit}ms"
+PAD = 17
+println ""
+header.each {print "${it.padRight(PAD)}"}
+println ""
 allStats.each() { vus, stat ->
+	stat.fprint(vus as Integer,PAD)
 	def errors = stat.errors
 	def p90mrt = stat.getPercentile90RT()
 	def std = stat.getStandardDeviationRT()
@@ -165,7 +172,11 @@ def processStartElement(element) {
 		case 'httpSample':
 		  def lb = element.lb
 		  def tn = element.tn
+		  def activethreads = element.na as Long
+		  
+		  collector = getCollector(activethreads)
 
+		  /*
 		  threadnames.add(tn)
 		  vus = threadnames.size() // number of  concurrent users = number of different thread names
 		  
@@ -175,6 +186,7 @@ def processStartElement(element) {
 			  collector =  new StatCollector()
 			  allStats.put(nextStep, collector)
 		  }
+		  */
 		  
 		 collector.visit(element, filter)
 		 counter++;
@@ -186,7 +198,26 @@ def processStartElement(element) {
 }
 
 
+/*
+ * Get the collector for a given number of concurrent threads
+ */
+def getCollector(long activethreads) {
+	if (activethreads == 0) activethreads = 1
+	
+	def remainder = (activethreads % stepSize)
+	
+	def floor = (activethreads - remainder) + stepSize
+	//if (floor == 0) floor = stepSize
+	//if (remainder > 1) println "floor $activethreads > $floor "
 
+	def collector = allStats[floor]
+	if (collector == null) {
+		collector = new StatCollector()
+		allStats[floor] = collector
+		print "."
+	} 
+	return collector
+}
 
 class StaxParser { 
 	static Object get(XMLStreamReader self, String key) {
