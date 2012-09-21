@@ -152,14 +152,14 @@ def errorRate = ((sumSamples == 0) ? 0 : (errorCount / sumSamples)*100) as Doubl
 def infoFile = new File(filename + ".info.txt")
 infoFile.delete()
 String sincludes = includes ? "includes='$includes'," : ""
-infoFile.append("Options:$sincludes limit=${limit} seconds, step=${stepSize} threads\n")
+infoFile.append("INFO: MAX VU=${currentvus}, STEP=${stepSize} VU, Stat limit=${limit} seconds, sincludes, Input File=$jtlFile\n")
+infoFile.append("Stats : \n")
+infoFile.append("Max Users until 90% MRT < ${limit/1000}s : $vulimit \n")
+infoFile.append("Max Users until 90% MRT < 3s : $vu3000 \n")
 infoFile.append("Samples: $sumSamples\n")
-infoFile.append("Errors: $errorCount\n")
-infoFile.append("Error Rate: ${errorRate.round(2)} %\n")
+infoFile.append("Errors: $errorCount (${errorRate.round(2)} %)\n")
 infoFile.append("Global Mean Response Time (MRT): ${avgRT.round()} ms\n")
 infoFile.append("Standard Deviation MRT : ${stdev.round()} ms\n")
-infoFile.append("Max Concurrent Users with MRT < 3s: $vu3000\n")
-infoFile.append("Max Concurrent Users with MRT < ${limit/1000}s: $vulimit\n")
 
 println "\n${infoFile.text}"
 println "> $infoFile"
