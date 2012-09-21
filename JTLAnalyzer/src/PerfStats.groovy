@@ -151,8 +151,8 @@ def errorRate = ((sumSamples == 0) ? 0 : (errorCount / sumSamples)*100) as Doubl
 
 def infoFile = new File(filename + ".info.txt")
 infoFile.delete()
-String sfilter = filter ? "requests='$filter'," : ""
-infoFile.append("Options:$sfilter limit=$limit, step=$stepSize\n")
+String sfilter = filter ? "includes='$filter'," : ""
+infoFile.append("Options:$sfilter limit=${limit} seconds, step=${stepSize} threads\n")
 infoFile.append("Samples: $sumSamples\n")
 infoFile.append("Errors: $errorCount\n")
 infoFile.append("Error Rate: ${errorRate.round(2)} %\n")
@@ -172,7 +172,7 @@ def processStartElement(element) {
 		case 'httpSample':
 		  def activethreads = element.na as Long	
 		  if (activethreads < currentvus)	  {
-			  //println "ignored ${element.lb} has $activethreads (last step was $currentvus)"
+			  //println "ignored sample for $activethreads VUs (current : $currentvus) : ${element.lb} has"
 			  break;
 		   }
 		  currentvus = activethreads
