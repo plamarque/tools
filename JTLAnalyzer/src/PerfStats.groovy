@@ -11,7 +11,7 @@
 def cl = new CliBuilder(usage: 'groovy PerfStats -f file [-l limit] [-i include] [-s step]')
 cl.'?'(longOpt:'help', 'Show usage information and quit')
 cl.f(argName:'file', longOpt:'file', args:1, required:false, 'JMeter output file (.jtl) REQUIRED')
-cl.i(argName:'label', longOpt:'include', args:1, required:false, 'include only samples whose label contains this label. default : includes all')
+cl.i(argName:'includes', longOpt:'includes', args:1, required:false, 'include only samples whose label contains this label. default : includes all')
 cl.s(argName:'vu step', longOpt:'step', args:1, required:false, 'number VU increments to aggregate on. default  is 100')
 cl.l(argName:'milliseconds', longOpt:'limit', args:1, required:false, 'stops gathering stats when MRT is over the given limit (in milliseconds). default : 6000')
 
@@ -38,7 +38,7 @@ limit = opt.l ? opt.l as Integer : 8000
 belowLimit = true
 
 // include only samples whose label contains this label. default : includes all
-filter = opt.i ? opt.i : null
+includes = opt.i ? opt.i : null
 
 // number VU increments to aggregate on. default  is 100
 stepSize = opt.s ? opt.s as Integer : 100 
@@ -66,7 +66,7 @@ counter = 0
 
 
 print "aggregating stats by groups of $stepSize threads"
-if (filter) print " for samples that match '$filter'"
+if (includes) print " for samples that match '$includes'"
 
 
 
@@ -151,8 +151,8 @@ def errorRate = ((sumSamples == 0) ? 0 : (errorCount / sumSamples)*100) as Doubl
 
 def infoFile = new File(filename + ".info.txt")
 infoFile.delete()
-String sfilter = filter ? "includes='$filter'," : ""
-infoFile.append("Options:$sfilter limit=${limit} seconds, step=${stepSize} threads\n")
+String sincludes = includes ? "includes='$includes'," : ""
+infoFile.append("Options:$sincludes limit=${limit} seconds, step=${stepSize} threads\n")
 infoFile.append("Samples: $sumSamples\n")
 infoFile.append("Errors: $errorCount\n")
 infoFile.append("Error Rate: ${errorRate.round(2)} %\n")
@@ -177,7 +177,7 @@ def processStartElement(element) {
 		   }
 		  currentvus = activethreads
 		  collector = getCollector(activethreads)
-		  collector.visit(element, filter)
+		  collector.visit(element, includes)
 		  counter++;
 		  break
 
@@ -243,7 +243,7 @@ class StatCollector {
 
   
   
-  	public void visit(def element, def filter) {
+  	public void visit(def element, def includes) {
   	    def t = element.t.toInteger()  // t is the response time
 		def lb = element.lb // lb is the page the label
 		def isSuccess = element.s // success
@@ -262,22 +262,26 @@ class StatCollector {
 		if (duration>0) tps = samples/duration	 // throughput is computed on all samples
    
 	
+
+		// ignore empty and not included requests
 		
-		// ignore empty and filtered requests
-		label = tn
-		boolean matchFilter = (filter != null && lb.contains(filter))
-		boolean shouldIgnore = ((label.trim().length() == 0) || matchFilter)
+		boolean matchIncludes = includes ? lb.contains(includes) : true
+		boolean shouldIgnore = ((tn.trim().length() == 0) || !matchIncludes)
+		
+		// println " $lb / label: $tn / success: $isSuccess / includes: '$includes' / matchIncludes: '$matchIncludes' / shouldIgnore: $shouldIgnore"
+		
 		if (shouldIgnore) {
-			return ; // filter 
+			return ; 
 		}
 		
 		// skip errors
 		if (isSuccess!= null && isSuccess == "false")  {
+			
 			errors++
 			return // we don't count the samples in error
 		}
 		
-			
+	
 		success++
 		
 		// store the response time, we'll need it for stats
