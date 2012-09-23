@@ -91,10 +91,6 @@ def processFile(jtlFile) {
 	}
 }
 
-// print the last collected group
-//collector.fprint(vus + collector.success + collector.errors, PAD)
-
-
 
 // global stats to be computed
 errorRate = 0.0 // % of errors
@@ -106,9 +102,10 @@ sumRT = 0.0
 sumSamples = 0
 vu3000 = 0
 vulimit = 0
+totalSamples = 0;
 
 
-def header = ['Concurrent Users','Mean RT (ms)','Throughput (rq/s)','90% RT (ms)', 'samples','MAX RT ','MIN RT','errors', 'duration (s)', 'Total Samples']
+def header = ['Concurrent Users','Mean RT (ms)','Throughput (rq/s)','90% RT (ms)', 'Retained Samples','MAX RT ','MIN RT','Errors', 'Step Duration (s)', 'Total Samples']
 
 // generates the csv stats file
 def csvFile = new File(filename + ".csv")
@@ -126,9 +123,9 @@ allStats.each() { vus, stat ->
 	def errors = stat.errors
 	def p90mrt = stat.getPercentile90RT()
 	def std = stat.getStandardDeviationRT()
-	def samples = stat.success
-
-    def row = [vus, stat.mrt, stat.tps, p90mrt, samples, stat.rtmax, stat.rtmin, errors, stat.duration, stat.samples]
+	def success = stat.success
+	totalSamples+=stat.samples
+    def row = [vus, stat.mrt, stat.tps, p90mrt, success, stat.rtmax, stat.rtmin, errors, stat.duration, stat.samples]
     csvFile.append row.join(';')
     csvFile.append '\n'
     if (p90mrt <= 3000) vu3000 = vus
@@ -137,7 +134,7 @@ allStats.each() { vus, stat ->
      errorCount+= errors
 	 sumRT += p90mrt // we compute average of 90 percentile MRT
 	 sumStd += std
-	 sumSamples+=samples
+	 sumSamples+=success
  	}
 	
 };
@@ -148,17 +145,17 @@ println "> $csvFile"
 avgRT = sumRT/allStats.size()
 stdev = sumStd / allStats.size()
 def errorRate = ((sumSamples == 0) ? 0 : (errorCount / sumSamples)*100) as Double
-
+def retainedRate = (totalSamples ==0) ? 0 : (sumSamples*100/totalSamples) as Double
 def infoFile = new File(filename + ".info.txt")
 infoFile.delete()
-String sincludes = includes ? "includes=', $includes'" : ""
-infoFile.append("RUN INFO: MAX VU=${currentvus}, STEP=${stepSize} VU, Stats limit=${limit} seconds$sincludes\n")
-infoFile.append("METRICS (90% MRT < ${limit/1000}s) : \n")
-infoFile.append("  Max Users : $vulimit \n")
+String sincludes = includes ? ", includes='$includes'" : ""
+infoFile.append("RUN INFO: MAX VU=${currentvus}, STEP=${stepSize} VU, Stats limit=${limit/1000} seconds$sincludes\n")
+infoFile.append("METRICS: \n")
+infoFile.append("  Max Users < ${limit/1000}s : $vulimit \n")
 infoFile.append("  Max Users < 3s : $vu3000 \n")
-infoFile.append("  Global Mean Response Time (MRT): ${avgRT.round()} ms\n")
+infoFile.append("  Overall MRT : ${avgRT.round()} ms\n")
 infoFile.append("  Standard Deviation MRT : ${stdev.round()} ms\n")
-infoFile.append("  Samples: $sumSamples\n")
+infoFile.append("  Retained Samples: $sumSamples (${retainedRate.round(2)} %)\n")
 infoFile.append("  Errors: $errorCount (${errorRate.round(2)} %)\n")
 println "\n${infoFile.text}"
 println "> $infoFile"
