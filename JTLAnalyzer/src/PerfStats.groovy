@@ -289,9 +289,9 @@ class StatCollector {
 		mrt = cumulRt / success
 		
 		// min and max RT
-		if (t>rtmax || rtmax==null) rtmax=t
+		if (t>rtmax || rtmax==0) rtmax=t
 		
-		if (t<rtmin || rtmin==null)  rtmin=t
+		if (t<rtmin || rtmin==0)  rtmin=t
 		
 
 	}
