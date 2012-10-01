@@ -13,7 +13,8 @@ cl.'?'(longOpt:'help', 'Show usage information and quit')
 cl.f(argName:'file', longOpt:'file', args:1, required:false, 'JMeter output file (.jtl) REQUIRED')
 cl.i(argName:'includes', longOpt:'includes', args:1, required:false, 'include only samples whose label contains this label. default : includes all')
 cl.s(argName:'vu step', longOpt:'step', args:1, required:false, 'number VU increments to aggregate on. default  is 100')
-cl.l(argName:'milliseconds', longOpt:'limit', args:1, required:false, 'stops gathering stats when MRT is over the given limit (in milliseconds). default : 6000')
+cl.l(argName:'limit', longOpt:'limit', args:1, required:false, 'stops gathering stats when MRT is over the given limit (in milliseconds). default : 6000')
+cl.v(argName:'vumax', longOpt:'vumax', args:1, required:false, 'stops gathering stats when number of vu is over vumax.')
 
 
 def opt = cl.parse(args)
@@ -34,6 +35,9 @@ def jtlFile = new File(filename)
 // stops gathering stats when MRT is over the given limit (in milliseconds)
 limit = opt.l ? opt.l as Integer : 8000 
 
+// vu max
+ vumax =  (opt.v) ?  (opt.v).toInteger() : null
+
 // global var that will tell the parser to strop collecting stats when limit is reached
 belowLimit = true
 
@@ -42,7 +46,6 @@ includes = opt.i ? opt.i : null
 
 // number VU increments to aggregate on. default  is 100
 stepSize = opt.s ? opt.s as Integer : 100 
-
 
 // names of thread whose stats have been collected
 threadnames = new TreeSet([]) 
@@ -53,9 +56,6 @@ currentvus = 0
 // number of VU for the next increment
 nextStep = stepSize 
 
-// current collector
-//collector = new StatCollector() 
-
 // map of stat collectors by step
 allStats = [ : ] 
 
@@ -63,33 +63,11 @@ allStats = [ : ]
 counter = 0
 
 
-
-
 print "aggregating stats by groups of $stepSize threads"
 if (includes) print " for samples that match '$includes'"
 
-
-
 // start parsing
 use (StaxParser) { processFile(jtlFile) }
-
-
-def processFile(jtlFile) {
-	def reader
-	try {
-
-		reader = XMLInputFactory.newInstance().createXMLStreamReader(new FileReader(jtlFile));
-		
-		while (reader.hasNext()) {
-			if (reader.startElement)
-				processStartElement(reader)
-			reader.next()
-
-		}
-	} finally {
-		reader?.close()
-	}
-}
 
 
 // global stats to be computed
@@ -161,6 +139,25 @@ println "\n${infoFile.text}"
 println "> $infoFile"
 
 
+def processFile(jtlFile) {
+	def reader
+	try {
+
+		reader = XMLInputFactory.newInstance().createXMLStreamReader(new FileReader(jtlFile));
+		
+		while (reader.hasNext()) {
+			if (reader.startElement) {
+				processStartElement(reader)
+				if (vumax != null && currentvus >= vumax) return;
+			}
+			reader.next()
+
+		}
+	} finally {
+		reader?.close()
+	}
+}
+
 
 def processStartElement(element) {
 	switch(element.name()) {
@@ -185,10 +182,7 @@ def processStartElement(element) {
 /*
  * Get the collector for a given number of concurrent threads
  */
-def getCollector(long activethreads) {
-
-
-	
+def getCollector(long activethreads) {	
 	// 0-100 > 100, 101-200 > 200
 	def remainder = ((activethreads-1) % stepSize)	
 	def floor = (activethreads-1 - remainder) + stepSize
@@ -199,8 +193,6 @@ def getCollector(long activethreads) {
 		allStats[floor] = collector
 		print "-> $floor"
 	}
-	//println "vu: ${activethreads} duration: ${collector.duration} samples: ${collector.samples} tps : ${collector.tps}"
-	
 	return collector
 }
 
@@ -219,7 +211,6 @@ class StaxParser {
 
 /** **/
 class StatCollector {
-  //int vu = 0       // number of VU in the step 
   double mrt = 0      // mean response tume
   double stdv = 0 // standard deviation
   double tps = 0      // throughput average
